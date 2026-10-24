@@ -20,8 +20,7 @@ function serviceWorker() {
 }
 
 export default defineConfig({
-  base: './', // relative paths, so the build can be hosted under any sub-path
-  // Not 5173: the earlier prototype registered a service worker on that port.
+  base: '/typewriter/',
   server: { port: 5180 },
   preview: { port: 5181 },
   plugins: [serviceWorker()],
