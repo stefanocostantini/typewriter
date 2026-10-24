@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Typewriter — Markdown to PDF</title>
+  <meta name="description" content="A distraction-free Markdown writing app. Write GitHub-flavored Markdown with inline styling and export a beautifully styled PDF. Works offline." />
+  <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#18191d" media="(prefers-color-scheme: dark)" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+</head>
+<body data-view="write">
+  <header class="topbar" id="topbar">
+    <div class="brand">
+      <img class="brand-mark" src="icons/icon.svg" alt="" width="24" height="24" />
+      <h1>Typewriter</h1>
+    </div>
+
+    <nav class="segmented" role="tablist" aria-label="View">
+      <button id="view-write" class="seg is-active" role="tab" aria-selected="true" data-view="write">Write</button>
+      <button id="view-style" class="seg" role="tab" aria-selected="false" data-view="style">PDF Style</button>
+      <span class="seg-indicator" aria-hidden="true"></span>
+    </nav>
+
+    <div class="actions">
+      <button id="btn-focus" class="btn btn-ghost only-write" aria-pressed="false" title="Focus mode: dim everything except the current paragraph (⌘⇧F)">Focus</button>
+      <button id="btn-reset-style" class="btn btn-ghost only-style" title="Restore the default PDF style">Reset style</button>
+      <button id="btn-open" class="btn btn-ghost hide-mobile" title="Open a .md or .css file (⌘O)">Open</button>
+      <button id="btn-save" class="btn btn-ghost hide-mobile" title="Download file (⌘S)">Save</button>
+      <button id="btn-pdf" class="btn btn-primary" title="Export PDF (⌘P)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        PDF
+      </button>
+      <input id="file-input" type="file" accept=".md,.markdown,.txt,.css,text/markdown,text/plain,text/css" hidden />
+    </div>
+  </header>
+
+  <main class="views">
+    <section id="write-view" class="view view-write" aria-label="Markdown editor">
+      <div id="md-editor" class="md-editor"></div>
+    </section>
+
+    <section id="style-view" class="view view-style" aria-label="PDF style editor" hidden>
+      <div class="style-pane style-pane-code">
+        <div class="pane-label">Stylesheet · applies to the exported PDF</div>
+        <div id="css-editor" class="css-editor"></div>
+      </div>
+      <div class="style-pane style-pane-preview">
+        <div class="pane-label">Preview</div>
+        <iframe id="style-preview" title="PDF preview"></iframe>
+      </div>
+    </section>
+  </main>
+
+  <footer class="statusbar" id="statusbar">
+    <span id="status-count"></span>
+    <span id="status-saved" class="saved">Saved locally</span>
+  </footer>
+
+  <iframe id="print-frame" class="print-frame" title="Print" aria-hidden="true" tabindex="-1"></iframe>
+  <div id="drop-overlay" class="drop-overlay" hidden><div>Drop a <b>.md</b> or <b>.css</b> file</div></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

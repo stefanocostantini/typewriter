@@ -1,0 +1,125 @@
+/* ================================================================
+   Typewriter — default PDF style
+   Everything here is applied to the preview AND the exported PDF.
+   The rendered Markdown lives inside  <article class="doc">…</article>
+   ================================================================ */
+
+@page {
+  size: A4;              /* or: Letter, A5, 210mm 297mm, landscape … */
+  margin: 22mm 20mm 24mm;
+}
+
+:root {
+  --ink: #1c1d22;
+  --muted: #6a6d7a;
+  --accent: #6c4cf5;
+  --rule: #e4e4ea;
+  --code-bg: #f5f5f8;
+}
+
+.doc {
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 11pt;
+  line-height: 1.6;
+  color: var(--ink);
+  hyphens: auto;
+  text-rendering: optimizeLegibility;
+  font-variant-ligatures: common-ligatures;
+}
+
+/* ---------- Headings ---------- */
+.doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 {
+  font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  line-height: 1.25;
+  margin: 1.6em 0 0.5em;
+  break-after: avoid;
+  color: #111;
+}
+.doc h1 {
+  font-size: 2.1em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 0;
+  padding-bottom: 0.3em;
+  border-bottom: 2px solid var(--accent);
+}
+.doc h2 { font-size: 1.45em; font-weight: 600; }
+.doc h3 { font-size: 1.15em; font-weight: 600; }
+.doc h4, .doc h5, .doc h6 { font-size: 1em; font-weight: 600; color: var(--muted); }
+
+/* ---------- Text ---------- */
+.doc p { margin: 0 0 0.9em; orphans: 3; widows: 3; }
+.doc a { color: var(--accent); text-decoration: none; border-bottom: 1px solid currentColor; }
+.doc strong { font-weight: 700; }
+.doc del { color: var(--muted); }
+.doc hr { border: 0; border-top: 1px solid var(--rule); margin: 2em 0; }
+
+/* ---------- Lists ---------- */
+.doc ul, .doc ol { margin: 0 0 0.9em; padding-left: 1.5em; }
+.doc li { margin: 0.2em 0; }
+.doc li > ul, .doc li > ol { margin-bottom: 0; }
+.doc li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.3em; }
+.doc input[type="checkbox"] { margin: 0 0.45em 0 0; accent-color: var(--accent); vertical-align: -0.1em; }
+
+/* ---------- Quotes ---------- */
+.doc blockquote {
+  margin: 1.2em 0;
+  padding: 0.2em 1.1em;
+  border-left: 3px solid var(--accent);
+  color: #44464f;
+  font-style: italic;
+  break-inside: avoid;
+}
+
+/* ---------- Code ---------- */
+.doc code, .doc pre {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+}
+.doc :not(pre) > code {
+  background: var(--code-bg);
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+}
+.doc pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  break-inside: avoid;
+}
+
+/* ---------- Tables ---------- */
+.doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2em 0;
+  font-size: 0.92em;
+  break-inside: avoid;
+}
+.doc th, .doc td { padding: 0.45em 0.7em; border-bottom: 1px solid var(--rule); text-align: left; }
+.doc th {
+  font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  border-bottom: 2px solid var(--ink);
+}
+.doc tbody tr:nth-child(even) { background: #fafafc; }
+
+/* ---------- Images ---------- */
+.doc img { max-width: 100%; height: auto; break-inside: avoid; }
+
+/* ---------- Print-only tweaks ---------- */
+@media print {
+  .doc a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: var(--muted);
+    border: 0;
+  }
+  /* Force a page break anywhere with:  <div class="page-break"></div> */
+  .doc .page-break { break-after: page; }
+}
