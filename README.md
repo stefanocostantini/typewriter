@@ -29,6 +29,41 @@ npm run build
 npm run preview
 ```
 
+## Hosting on GitHub Pages
+
+Because [`vite.config.js`](./vite.config.js) uses relative paths (`base: './'`), the built app runs out-of-the-box on GitHub Pages without any path configuration changes.
+
+### Automated Deployment (GitHub Actions)
+
+An automated deployment workflow is preconfigured in [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml).
+
+1. Go to your repository on GitHub: **[stefanocostantini/typewriter](https://github.com/stefanocostantini/typewriter)**.
+2. Click **Settings** → **Pages** (in the left sidebar).
+3. Under **Build and deployment** → **Source**, select **GitHub Actions**.
+4. Every time you push to the `main` branch, GitHub Actions will automatically build the app and deploy it to:
+   ```
+   https://stefanocostantini.github.io/typewriter/
+   ```
+
+### Manual Deployment via Branch (`gh-pages`)
+
+If you prefer deploying via a branch:
+
+```bash
+# Install gh-pages tool (one-time)
+npm install -D gh-pages
+
+# Build and push the dist directory to the gh-pages branch
+npm run build
+npx gh-pages -d dist
+```
+
+Then in GitHub **Settings** → **Pages**, select **Deploy from a branch** and choose the `gh-pages` branch.
+
+> [!TIP]
+> Because GitHub Pages is served over HTTPS, the Service Worker activates automatically. You can install Typewriter as an offline PWA on any desktop (Chrome/Safari) or mobile device (iOS/Android).
+
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
