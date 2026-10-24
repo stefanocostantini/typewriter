@@ -49,6 +49,7 @@ const els = {
   indicator: $('.seg-indicator'),
   writeView: $('#write-view'),
   styleView: $('#style-view'),
+  btnNew: $('#btn-new'),
   btnFocus: $('#btn-focus'),
   btnReset: $('#btn-reset-style'),
   btnOpen: $('#btn-open'),
@@ -138,20 +139,51 @@ function updateCount() {
 }
 
 let saveTimer = 0;
+const AUTOSAVE_INACTIVITY_MS = 2000; // 2 seconds of inactivity
+let fileHandle = null;
+let isDirty = false;
+
 function scheduleSave() {
-  els.saved.textContent = 'Editing…';
+  isDirty = true;
+  els.saved.textContent = fileHandle ? `Editing ${fileHandle.name}…` : 'Editing…';
   els.saved.classList.add('dirty');
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
+  saveTimer = setTimeout(performAutoSave, AUTOSAVE_INACTIVITY_MS);
+}
+
+async function performAutoSave() {
+  document.body.classList.remove('is-typing');
+  const mdText = mdEditor.getValue();
+  const cssText = cssEditor.getValue();
+
+  // 1. Always keep localStorage in sync
+  try {
+    localStorage.setItem(STORE.md, mdText);
+    localStorage.setItem(STORE.css, cssText);
+  } catch (err) {
+    console.warn('localStorage save failed', err);
+  }
+
+  // 2. If a local file is linked (via File System Access API), write straight to it
+  if (fileHandle) {
     try {
-      localStorage.setItem(STORE.md, mdEditor.getValue());
-      localStorage.setItem(STORE.css, cssEditor.getValue());
-      els.saved.textContent = 'Saved locally';
+      const writable = await fileHandle.createWritable();
+      await writable.write(mdText);
+      await writable.close();
+      isDirty = false;
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      els.saved.textContent = `Auto-saved to ${fileHandle.name} (${timeStr})`;
       els.saved.classList.remove('dirty');
-    } catch {
-      els.saved.textContent = 'Could not save';
+      return;
+    } catch (err) {
+      console.warn('File handle auto-save failed', err);
     }
-  }, 400);
+  }
+
+  // If no file handle is linked yet, it is auto-saved locally in browser storage
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  els.saved.textContent = `Saved locally (${timeStr})`;
+  els.saved.classList.remove('dirty');
 }
 
 // Hide the toolbar while typing, like iA Writer; it returns on mouse move.
@@ -173,18 +205,132 @@ function download(filename, text, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-function save() {
-  if (view === 'style') download('typewriter-style.css', cssEditor.getValue(), 'text/css');
-  else download(`${documentTitle(mdEditor.getValue())}.md`, mdEditor.getValue(), 'text/markdown');
+function newDocument() {
+  const currentText = mdEditor.getValue().trim();
+  if (currentText.length > 0 && isDirty) {
+    const ok = window.confirm('You have unsaved changes. Discard them and start a new document?');
+    if (!ok) return;
+  }
+  fileHandle = null;
+  mdEditor.setValue('');
+  isDirty = false;
+  try {
+    localStorage.setItem(STORE.md, '');
+  } catch {}
+  updateCount();
+  els.saved.textContent = 'New document';
+  els.saved.classList.remove('dirty');
+  toast('New document created');
+  mdEditor.focus();
 }
 
-async function openFile(file) {
+async function save() {
+  if (view === 'style') {
+    download('typewriter-style.css', cssEditor.getValue(), 'text/css');
+    toast('Saved style');
+    return;
+  }
+
+  const text = mdEditor.getValue();
+
+  // Modern File System Access API (Chrome, Edge, Opera)
+  if ('showSaveFilePicker' in window) {
+    try {
+      if (!fileHandle) {
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName: `${documentTitle(text)}.md`,
+          types: [{
+            description: 'Markdown File',
+            accept: { 'text/markdown': ['.md', '.markdown'] },
+          }],
+        });
+      }
+      const writable = await fileHandle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      isDirty = false;
+      toast(`Saved to ${fileHandle.name}`);
+      els.saved.textContent = `Saved to ${fileHandle.name}`;
+      els.saved.classList.remove('dirty');
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return; // User canceled the picker
+      console.warn('showSaveFilePicker failed, falling back to download', err);
+    }
+  }
+
+  // Fallback download (Safari, Firefox)
+  download(`${documentTitle(text)}.md`, text, 'text/markdown');
+  isDirty = false;
+  toast('Downloaded .md');
+  els.saved.textContent = 'Downloaded .md';
+  els.saved.classList.remove('dirty');
+}
+
+async function openFile() {
+  // Try modern File System Access API first
+  if ('showOpenFilePicker' in window) {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{
+          description: 'Markdown or CSS Files',
+          accept: {
+            'text/markdown': ['.md', '.markdown'],
+            'text/plain': ['.txt'],
+            'text/css': ['.css'],
+          },
+        }],
+      });
+      const file = await handle.getFile();
+      const text = await file.text();
+      const isCss = /\.css$/i.test(file.name);
+
+      if (isCss) {
+        cssEditor.setValue(text);
+        setView('style');
+      } else {
+        if (isDirty && mdEditor.getValue().trim().length > 0) {
+          const ok = window.confirm('You have unsaved changes. Discard them and open this file?');
+          if (!ok) return;
+        }
+        fileHandle = handle;
+        mdEditor.setValue(text);
+        isDirty = false;
+        setView('write');
+      }
+      toast(`Opened ${file.name}`);
+      els.saved.textContent = isCss ? 'Saved locally' : `Linked to ${file.name}`;
+      els.saved.classList.remove('dirty');
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return; // User canceled picker
+    }
+  }
+
+  // Fallback to hidden file input
+  els.fileInput.click();
+}
+
+async function loadFromFileInput(file) {
   if (!file) return;
   const text = await file.text();
   const isCss = /\.css$/i.test(file.name) || file.type === 'text/css';
-  (isCss ? cssEditor : mdEditor).setValue(text);
-  setView(isCss ? 'style' : 'write');
+  if (isCss) {
+    cssEditor.setValue(text);
+    setView('style');
+  } else {
+    if (isDirty && mdEditor.getValue().trim().length > 0) {
+      const ok = window.confirm('You have unsaved changes. Discard them and open this file?');
+      if (!ok) return;
+    }
+    fileHandle = null;
+    mdEditor.setValue(text);
+    isDirty = false;
+    setView('write');
+  }
   toast(`Opened ${file.name}`);
+  els.saved.textContent = `Opened ${file.name}`;
+  els.saved.classList.remove('dirty');
 }
 
 async function exportPdf() {
@@ -207,24 +353,34 @@ function toast(msg) {
 els.segs.forEach((s) => s.addEventListener('click', () => setView(s.dataset.view)));
 window.addEventListener('resize', moveIndicator);
 
+els.btnNew.addEventListener('click', newDocument);
 els.btnFocus.addEventListener('click', () => { setFocusMode(!focusMode); mdEditor.focus(); });
 els.btnPdf.addEventListener('click', exportPdf);
 els.btnSave.addEventListener('click', save);
-els.btnOpen.addEventListener('click', () => els.fileInput.click());
-els.fileInput.addEventListener('change', () => { openFile(els.fileInput.files[0]); els.fileInput.value = ''; });
+els.btnOpen.addEventListener('click', openFile);
+els.fileInput.addEventListener('change', () => { loadFromFileInput(els.fileInput.files[0]); els.fileInput.value = ''; });
 els.btnReset.addEventListener('click', () => {
   if (!confirm('Replace your stylesheet with the default one?')) return;
   cssEditor.setValue(defaultCss);
   toast('Default style restored');
 });
 
+// Warn on browser tab close/reload if there are unsaved changes
+window.addEventListener('beforeunload', (e) => {
+  if (isDirty && mdEditor.getValue().trim().length > 0 && !fileHandle) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
 document.addEventListener('keydown', (e) => {
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
   const k = e.key.toLowerCase();
-  if (k === 'p') { e.preventDefault(); exportPdf(); }
+  if (k === 'n' && !e.shiftKey && !e.altKey) { e.preventDefault(); newDocument(); }
+  else if (k === 'p') { e.preventDefault(); exportPdf(); }
   else if (k === 's') { e.preventDefault(); save(); }
-  else if (k === 'o') { e.preventDefault(); els.fileInput.click(); }
+  else if (k === 'o') { e.preventDefault(); openFile(); }
   else if (k === 'f' && e.shiftKey) { e.preventDefault(); setFocusMode(!focusMode); }
   else if (k === '1') { e.preventDefault(); setView('write'); }
   else if (k === '2') { e.preventDefault(); setView('style'); }

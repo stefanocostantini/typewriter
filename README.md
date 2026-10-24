@@ -10,8 +10,8 @@ A distraction-free, single-window Markdown writing PWA with live inline styling 
 - **PDF Style View**: Full-screen split view with an editable stylesheet on the left and a live paper preview on the right.
 - **Print to PDF (⌘P)**: Generates selectable, searchable vector PDFs using `@page` rules and standard browser print engines.
 - **Offline / PWA Ready**: Bundled IBM Plex Mono & Inter fonts, Service Worker offline caching, and PWA manifest.
-- **Local Persistence**: Drafts and custom styles save continuously to `localStorage`.
-- **File Management**: Open (`⌘O`) or drag-and-drop `.md` and `.css` files; download (`⌘S`) at any time.
+- **Auto-Save on Inactivity**: Automatically saves changes every 2 seconds of typing inactivity. If linked to a file via the File System Access API, it syncs directly to the file on disk; otherwise saves to local browser storage.
+- **Document Management**: Start clean with **New** (`⌘N`, with confirmation prompt if unsaved changes exist), open files (`⌘O`), drag-and-drop, or manual save (`⌘S`).
 
 ## Quick Start
 
@@ -92,6 +92,7 @@ Then in GitHub **Settings** → **Pages**, select **Deploy from a branch** and c
 
 | Shortcut | Action |
 | --- | --- |
+| `⌘ N` | New document (prompts if unsaved changes) |
 | `⌘ B` | Toggle **bold** |
 | `⌘ I` | Toggle *italic* |
 | `⌘ K` | Insert link |
