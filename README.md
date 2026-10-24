@@ -101,6 +101,7 @@ Then in GitHub **Settings** → **Pages**, select **Deploy from a branch** and c
 | `⌘ 2` | Switch to **PDF Style** view |
 | `⌘ P` | Export as PDF |
 | `⌘ S` | Save Markdown / CSS file |
+| `⌘ ⇧ S` | Save As (save to a new local file) |
 | `⌘ O` | Open file |
 
 ## Project Structure

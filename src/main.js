@@ -143,6 +143,76 @@ const AUTOSAVE_INACTIVITY_MS = 2000; // 2 seconds of inactivity
 let fileHandle = null;
 let isDirty = false;
 
+/* ---------- IndexedDB File Handle Storage ---------- */
+
+const DB_NAME = 'typewriter_db';
+const DB_STORE = 'handles';
+const HANDLE_KEY = 'active_file_handle';
+
+function openDatabase() {
+  return new Promise((resolve) => {
+    if (!('indexedDB' in window)) return resolve(null);
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(DB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function storeFileHandle(handle) {
+  try {
+    const db = await openDatabase();
+    if (!db) return;
+    const tx = db.transaction(DB_STORE, 'readwrite');
+    if (handle) {
+      tx.objectStore(DB_STORE).put(handle, HANDLE_KEY);
+    } else {
+      tx.objectStore(DB_STORE).delete(HANDLE_KEY);
+    }
+  } catch (err) {
+    console.warn('Could not store file handle in IndexedDB', err);
+  }
+}
+
+async function getStoredFileHandle() {
+  try {
+    const db = await openDatabase();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      const tx = db.transaction(DB_STORE, 'readonly');
+      const req = tx.objectStore(DB_STORE).get(HANDLE_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (err) {
+    return null;
+  }
+}
+
+/* ---------- Permission Helpers ---------- */
+
+async function verifyPermission(handle, readWrite = true) {
+  if (!handle || typeof handle.queryPermission !== 'function') return false;
+  const options = readWrite ? { mode: 'readwrite' } : { mode: 'read' };
+  try {
+    if ((await handle.queryPermission(options)) === 'granted') {
+      return true;
+    }
+    if (typeof handle.requestPermission === 'function') {
+      if ((await handle.requestPermission(options)) === 'granted') {
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('Permission query/request failed', err);
+  }
+  return false;
+}
+
+/* ---------- Save & Auto-Save ---------- */
+
 function scheduleSave() {
   isDirty = true;
   els.saved.textContent = fileHandle ? `Editing ${fileHandle.name}…` : 'Editing…';
@@ -156,7 +226,7 @@ async function performAutoSave() {
   const mdText = mdEditor.getValue();
   const cssText = cssEditor.getValue();
 
-  // 1. Always keep localStorage in sync
+  // 1. Always keep browser storage (localStorage) in sync as a fallback
   try {
     localStorage.setItem(STORE.md, mdText);
     localStorage.setItem(STORE.css, cssText);
@@ -164,25 +234,42 @@ async function performAutoSave() {
     console.warn('localStorage save failed', err);
   }
 
-  // 2. If a local file is linked (via File System Access API), write straight to it
+  // 2. If a local file is linked via File System Access API, write straight to it
   if (fileHandle) {
     try {
-      const writable = await fileHandle.createWritable();
-      await writable.write(mdText);
-      await writable.close();
-      isDirty = false;
-      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      els.saved.textContent = `Auto-saved to ${fileHandle.name} (${timeStr})`;
-      els.saved.classList.remove('dirty');
-      return;
+      // In background timers, Chrome requires permission to already be granted (cannot prompt without user gesture)
+      let hasWritePerm = false;
+      if (typeof fileHandle.queryPermission === 'function') {
+        hasWritePerm = (await fileHandle.queryPermission({ mode: 'readwrite' })) === 'granted';
+      } else {
+        hasWritePerm = true;
+      }
+
+      if (hasWritePerm) {
+        const writable = await fileHandle.createWritable();
+        await writable.write(mdText);
+        await writable.close();
+        isDirty = false;
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        els.saved.textContent = `Auto-saved to ${fileHandle.name} (${timeStr})`;
+        els.saved.classList.remove('dirty');
+        return;
+      } else {
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        els.saved.textContent = `Saved in browser (${timeStr}) · Press ⌘S to sync ${fileHandle.name}`;
+        return;
+      }
     } catch (err) {
       console.warn('File handle auto-save failed', err);
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      els.saved.textContent = `Saved in browser (${timeStr}) · Press ⌘S to sync`;
+      return;
     }
   }
 
-  // If no file handle is linked yet, it is auto-saved locally in browser storage
+  // If no file handle is linked yet, it is saved in browser storage
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  els.saved.textContent = `Saved locally (${timeStr})`;
+  els.saved.textContent = `Saved in browser (${timeStr})`;
   els.saved.classList.remove('dirty');
 }
 
@@ -205,13 +292,14 @@ function download(filename, text, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-function newDocument() {
+async function newDocument() {
   const currentText = mdEditor.getValue().trim();
   if (currentText.length > 0 && isDirty) {
     const ok = window.confirm('You have unsaved changes. Discard them and start a new document?');
     if (!ok) return;
   }
   fileHandle = null;
+  await storeFileHandle(null);
   mdEditor.setValue('');
   isDirty = false;
   try {
@@ -224,33 +312,75 @@ function newDocument() {
   mdEditor.focus();
 }
 
-async function save() {
+async function save(options = {}) {
+  const forceSaveAs = options.saveAs === true;
+
   if (view === 'style') {
-    download('typewriter-style.css', cssEditor.getValue(), 'text/css');
+    const cssText = cssEditor.getValue();
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: 'typewriter-style.css',
+          types: [{
+            description: 'CSS Stylesheet',
+            accept: { 'text/css': ['.css'] },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(cssText);
+        await writable.close();
+        toast(`Saved to ${handle.name}`);
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+    download('typewriter-style.css', cssText, 'text/css');
     toast('Saved style');
     return;
   }
 
   const text = mdEditor.getValue();
 
+  // If we already have a linked file and not forcing Save As, write to it
+  if (fileHandle && !forceSaveAs) {
+    try {
+      const hasPerm = await verifyPermission(fileHandle, true);
+      if (hasPerm) {
+        const writable = await fileHandle.createWritable();
+        await writable.write(text);
+        await writable.close();
+        isDirty = false;
+        toast(`Saved to ${fileHandle.name}`);
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        els.saved.textContent = `Saved to ${fileHandle.name} (${timeStr})`;
+        els.saved.classList.remove('dirty');
+        return;
+      }
+    } catch (err) {
+      console.warn('Saving to existing handle failed, falling back to picker', err);
+    }
+  }
+
   // Modern File System Access API (Chrome, Edge, Opera)
   if ('showSaveFilePicker' in window) {
     try {
-      if (!fileHandle) {
-        fileHandle = await window.showSaveFilePicker({
-          suggestedName: `${documentTitle(text)}.md`,
-          types: [{
-            description: 'Markdown File',
-            accept: { 'text/markdown': ['.md', '.markdown'] },
-          }],
-        });
-      }
+      const handle = await window.showSaveFilePicker({
+        suggestedName: `${documentTitle(text)}.md`,
+        types: [{
+          description: 'Markdown File',
+          accept: { 'text/markdown': ['.md', '.markdown'] },
+        }],
+      });
+      fileHandle = handle;
+      await storeFileHandle(handle);
       const writable = await fileHandle.createWritable();
       await writable.write(text);
       await writable.close();
       isDirty = false;
       toast(`Saved to ${fileHandle.name}`);
-      els.saved.textContent = `Saved to ${fileHandle.name}`;
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      els.saved.textContent = `Saved to ${fileHandle.name} (${timeStr})`;
       els.saved.classList.remove('dirty');
       return;
     } catch (err) {
@@ -259,12 +389,51 @@ async function save() {
     }
   }
 
-  // Fallback download (Safari, Firefox)
+  // Fallback download (Safari, Firefox, or unsupported contexts)
   download(`${documentTitle(text)}.md`, text, 'text/markdown');
   isDirty = false;
   toast('Downloaded .md');
-  els.saved.textContent = 'Downloaded .md';
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  els.saved.textContent = `Downloaded .md (${timeStr})`;
   els.saved.classList.remove('dirty');
+}
+
+async function loadFromHandle(handle) {
+  if (!handle) return;
+  try {
+    const file = await handle.getFile();
+    const text = await file.text();
+    const isCss = /\.css$/i.test(file.name);
+
+    if (isCss) {
+      cssEditor.setValue(text);
+      setView('style');
+      toast(`Opened ${file.name}`);
+      els.saved.textContent = `Loaded ${file.name} (style)`;
+      els.saved.classList.remove('dirty');
+    } else {
+      if (isDirty && mdEditor.getValue().trim().length > 0) {
+        const ok = window.confirm('You have unsaved changes. Discard them and open this file?');
+        if (!ok) return;
+      }
+      fileHandle = handle;
+      await storeFileHandle(handle);
+      mdEditor.setValue(text);
+      isDirty = false;
+      setView('write');
+
+      // Request write permission during this user gesture so autosave can write directly to disk
+      const canWrite = await verifyPermission(handle, true);
+      toast(`Opened ${file.name}`);
+      els.saved.textContent = canWrite
+        ? `Linked to ${file.name}`
+        : `Opened ${file.name} (read-only · ⌘S to sync)`;
+      els.saved.classList.remove('dirty');
+    }
+  } catch (err) {
+    console.error('Failed to load file handle', err);
+    toast('Failed to open file');
+  }
 }
 
 async function openFile() {
@@ -281,29 +450,11 @@ async function openFile() {
           },
         }],
       });
-      const file = await handle.getFile();
-      const text = await file.text();
-      const isCss = /\.css$/i.test(file.name);
-
-      if (isCss) {
-        cssEditor.setValue(text);
-        setView('style');
-      } else {
-        if (isDirty && mdEditor.getValue().trim().length > 0) {
-          const ok = window.confirm('You have unsaved changes. Discard them and open this file?');
-          if (!ok) return;
-        }
-        fileHandle = handle;
-        mdEditor.setValue(text);
-        isDirty = false;
-        setView('write');
-      }
-      toast(`Opened ${file.name}`);
-      els.saved.textContent = isCss ? 'Saved locally' : `Linked to ${file.name}`;
-      els.saved.classList.remove('dirty');
+      await loadFromHandle(handle);
       return;
     } catch (err) {
       if (err.name === 'AbortError') return; // User canceled picker
+      console.warn('showOpenFilePicker failed, falling back to input', err);
     }
   }
 
@@ -324,6 +475,7 @@ async function loadFromFileInput(file) {
       if (!ok) return;
     }
     fileHandle = null;
+    await storeFileHandle(null);
     mdEditor.setValue(text);
     isDirty = false;
     setView('write');
@@ -356,7 +508,7 @@ window.addEventListener('resize', moveIndicator);
 els.btnNew.addEventListener('click', newDocument);
 els.btnFocus.addEventListener('click', () => { setFocusMode(!focusMode); mdEditor.focus(); });
 els.btnPdf.addEventListener('click', exportPdf);
-els.btnSave.addEventListener('click', save);
+els.btnSave.addEventListener('click', () => save());
 els.btnOpen.addEventListener('click', openFile);
 els.fileInput.addEventListener('change', () => { loadFromFileInput(els.fileInput.files[0]); els.fileInput.value = ''; });
 els.btnReset.addEventListener('click', () => {
@@ -365,9 +517,14 @@ els.btnReset.addEventListener('click', () => {
   toast('Default style restored');
 });
 
+// Click statusbar indicator to save/sync
+els.saved.style.cursor = 'pointer';
+els.saved.title = 'Click to save or sync';
+els.saved.addEventListener('click', () => save());
+
 // Warn on browser tab close/reload if there are unsaved changes
 window.addEventListener('beforeunload', (e) => {
-  if (isDirty && mdEditor.getValue().trim().length > 0 && !fileHandle) {
+  if (isDirty && mdEditor.getValue().trim().length > 0) {
     e.preventDefault();
     e.returnValue = '';
   }
@@ -379,7 +536,14 @@ document.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (k === 'n' && !e.shiftKey && !e.altKey) { e.preventDefault(); newDocument(); }
   else if (k === 'p') { e.preventDefault(); exportPdf(); }
-  else if (k === 's') { e.preventDefault(); save(); }
+  else if (k === 's') {
+    e.preventDefault();
+    if (e.shiftKey) {
+      save({ saveAs: true });
+    } else {
+      save();
+    }
+  }
   else if (k === 'o') { e.preventDefault(); openFile(); }
   else if (k === 'f' && e.shiftKey) { e.preventDefault(); setFocusMode(!focusMode); }
   else if (k === '1') { e.preventDefault(); setView('write'); }
@@ -390,11 +554,29 @@ let dragDepth = 0;
 window.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; els.drop.hidden = false; });
 window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; els.drop.hidden = true; } });
 window.addEventListener('dragover', (e) => e.preventDefault());
-window.addEventListener('drop', (e) => {
+window.addEventListener('drop', async (e) => {
   e.preventDefault();
   dragDepth = 0;
   els.drop.hidden = true;
-  openFile(e.dataTransfer.files[0]);
+
+  // Modern browsers support getting a FileSystemFileHandle directly from drag-and-drop
+  const item = e.dataTransfer.items?.[0];
+  if (item && 'getAsFileSystemHandle' in item) {
+    try {
+      const handle = await item.getAsFileSystemHandle();
+      if (handle && handle.kind === 'file') {
+        await loadFromHandle(handle);
+        return;
+      }
+    } catch (err) {
+      console.warn('getAsFileSystemHandle failed, falling back to file input', err);
+    }
+  }
+
+  const file = e.dataTransfer.files?.[0];
+  if (file) {
+    await loadFromFileInput(file);
+  }
 });
 
 /* ---------- Boot ---------- */
@@ -402,6 +584,27 @@ window.addEventListener('drop', (e) => {
 setView('write');
 setFocusMode(focusMode);
 document.fonts.ready.then(() => { moveIndicator(); mdEditor.view.requestMeasure(); });
+
+// Restore linked file handle from IndexedDB if available
+getStoredFileHandle().then(async (handle) => {
+  if (!handle) return;
+  try {
+    await handle.getFile();
+    fileHandle = handle;
+    const perm = typeof handle.queryPermission === 'function'
+      ? await handle.queryPermission({ mode: 'readwrite' })
+      : 'prompt';
+    if (perm === 'granted') {
+      els.saved.textContent = `Linked to ${handle.name}`;
+    } else {
+      els.saved.textContent = `Linked to ${handle.name} (⌘S to sync)`;
+    }
+  } catch (err) {
+    console.warn('Stored file handle is no longer accessible', err);
+    fileHandle = null;
+    await storeFileHandle(null);
+  }
+});
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {
@@ -411,3 +614,4 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()));
   }
 }
+
