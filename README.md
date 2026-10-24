@@ -33,9 +33,33 @@ npm run preview
 
 Because [`vite.config.js`](./vite.config.js) uses relative paths (`base: './'`), the built app runs out-of-the-box on GitHub Pages without any path configuration changes.
 
-### Automated Deployment (GitHub Actions)
+### Adding to an Existing GitHub Pages Site / Repository (Subfolder)
 
-An automated deployment workflow is preconfigured in [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml).
+If you already have a GitHub Pages website (such as `username.github.io` or a custom domain) and want Typewriter to live in a `/typewriter/` subfolder (e.g. `https://yourdomain.com/typewriter/`):
+
+1. **Build the production bundle** in this repository:
+   ```bash
+   npm run build
+   ```
+2. **Copy the `dist/` contents** into a `typewriter/` directory in your existing site's repo:
+   ```bash
+   # From your typewriter folder:
+   mkdir -p /path/to/existing-site-repo/typewriter
+   cp -R dist/* /path/to/existing-site-repo/typewriter/
+   ```
+3. **Commit and push** in your existing site's repository:
+   ```bash
+   cd /path/to/existing-site-repo
+   git add typewriter
+   git commit -m "Add Typewriter app to /typewriter"
+   git push
+   ```
+
+Because [`vite.config.js`](./vite.config.js) uses relative asset paths (`base: './'`), the manifest, scripts, styles, and web fonts will automatically resolve inside `/typewriter/`. Additionally, the Service Worker scope is automatically bounded to `/typewriter/`, so it will never interfere with the rest of your existing website.
+
+### Automated Deployment (Standalone Repository via GitHub Actions)
+
+If you want this repository to deploy its own standalone GitHub Pages site, a workflow is preconfigured in [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml).
 
 1. Go to your repository on GitHub: **[stefanocostantini/typewriter](https://github.com/stefanocostantini/typewriter)**.
 2. Click **Settings** → **Pages** (in the left sidebar).
