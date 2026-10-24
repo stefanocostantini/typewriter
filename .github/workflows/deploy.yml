@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18 # Update to match your project's node version
+          node-version: 22 # Update to match your project's node version
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
