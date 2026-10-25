@@ -82,11 +82,13 @@ export function printPdf(iframe, { css, markdown }) {
       document.title = title; // some browsers take the filename from the top-level title
       const done = () => { document.title = prevTitle; resolve(); };
       win.addEventListener('afterprint', done, { once: true });
-      setTimeout(done, 4000);
+      setTimeout(done, 5000);
       // Give web fonts / images a moment to load before printing.
       (win.document.fonts?.ready ?? Promise.resolve()).then(() => {
-        win.focus();
-        win.print();
+        setTimeout(() => {
+          win.focus();
+          win.print();
+        }, 200);
       });
     }, { once: true });
     iframe.srcdoc = documentHtml({ title, css, body: renderMarkdown(markdown) });
@@ -98,13 +100,15 @@ export async function generatePdfBlob({ title = 'Document', css = '', markdown =
   const container = document.createElement('div');
   container.className = 'doc';
   container.style.position = 'fixed';
-  container.style.left = '-10000px';
+  container.style.left = '0';
   container.style.top = '0';
   container.style.width = '794px'; // 210mm in standard 96 DPI CSS pixels (A4 width)
   container.style.boxSizing = 'border-box';
   container.style.background = '#ffffff';
   container.style.color = '#111111';
   container.style.padding = '22mm 20mm 24mm';
+  container.style.zIndex = '-9999';
+  container.style.pointerEvents = 'none';
 
   const styleEl = document.createElement('style');
   styleEl.textContent = css;
@@ -124,6 +128,13 @@ export async function generatePdfBlob({ title = 'Document', css = '', markdown =
 
   document.body.appendChild(container);
 
+  // Give web fonts a moment to ensure custom typography renders properly
+  await (document.fonts?.ready ?? Promise.resolve());
+
+  if (typeof window !== 'undefined') {
+    window.html2canvas = html2canvas;
+  }
+
   try {
     const doc = new jsPDF({
       orientation: 'portrait',
@@ -131,11 +142,18 @@ export async function generatePdfBlob({ title = 'Document', css = '', markdown =
       format: 'a4',
     });
 
-    await new Promise((resolve) => {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('PDF generation timed out'));
+      }, 15000);
+
       doc.html(container, {
-        callback: () => resolve(),
+        callback: () => {
+          clearTimeout(timeout);
+          resolve();
+        },
         html2canvas: {
-          scale: 2,
+          scale: 1.5, // 1.5 provides crisp Retina rendering while avoiding mobile iOS WebKit canvas memory crash
           useCORS: true,
           logging: false,
         },
@@ -144,6 +162,9 @@ export async function generatePdfBlob({ title = 'Document', css = '', markdown =
         width: 595.28,
         windowWidth: 794,
         autoPaging: 'text',
+      }).catch((err) => {
+        clearTimeout(timeout);
+        reject(err);
       });
     });
 

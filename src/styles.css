@@ -245,11 +245,14 @@ body.is-typing .statusbar { opacity: 0; pointer-events: none; }
 /* ---------- Misc ---------- */
 .print-frame {
   position: fixed;
-  left: -10000px;
+  left: 0;
   top: 0;
-  width: 210mm;
-  height: 297mm;
+  width: 100%;
+  height: 100%;
   border: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -9999;
 }
 
 .drop-overlay {

@@ -528,8 +528,8 @@ async function exportPdf() {
     ('standalone' in navigator && navigator.standalone) ||
     window.matchMedia('(display-mode: standalone)').matches;
 
-  // On iOS standalone PWA (or mobile where window.print is blocked / unavailable),
-  // generate client-side PDF directly and open the native iOS Share Sheet ("Save to Files" / "Print")
+  // On iOS (both Safari and installed standalone PWA), open the native iOS Share Sheet
+  // or generate client-side PDF directly ("Save to Files" / "Print" / "Share")
   if (isIOS || isStandalone) {
     try {
       toast('Generating PDF…');
@@ -542,26 +542,40 @@ async function exportPdf() {
       const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
 
       if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-        await navigator.share({
-          files: [pdfFile],
-          title: filename,
-        });
-        toast('PDF ready');
-        return;
+        try {
+          await navigator.share({
+            files: [pdfFile],
+            title: filename,
+          });
+          toast('PDF ready');
+          return;
+        } catch (shareErr) {
+          if (shareErr.name === 'AbortError') return; // User closed share sheet
+          console.warn('navigator.share failed, trying fallback download/view', shareErr);
+        }
       }
 
-      // Fallback: download the generated PDF blob
-      const a = Object.assign(document.createElement('a'), {
-        href: URL.createObjectURL(pdfBlob),
-        download: filename,
-      });
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      toast('Downloaded PDF');
+      // Fallback: download or view the generated PDF blob
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      if (isStandalone) {
+        // In iOS standalone PWA, <a download> is ignored by WebKit.
+        // Opening the blob URL displays it in the viewer sheet
+        window.open(blobUrl, '_blank') || (window.location.href = blobUrl);
+        toast('PDF opened');
+      } else {
+        const a = Object.assign(document.createElement('a'), {
+          href: blobUrl,
+          download: filename,
+        });
+        a.click();
+        toast('Downloaded PDF');
+      }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
       return;
     } catch (err) {
-      if (err.name === 'AbortError') return; // User cancelled share sheet
+      if (err.name === 'AbortError') return;
       console.error('Client-side PDF generation failed, falling back to print dialog', err);
+      toast('PDF generation failed, opening print dialog…');
     }
   }
 
