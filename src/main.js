@@ -8,7 +8,7 @@ import './styles.css';
 
 import defaultCss from './default-style.css?raw';
 import { createMarkdownEditor, createCssEditor } from './editor.js';
-import { createPreview, printPdf, documentTitle } from './render.js';
+import { createPreview, printPdf, generatePdfBlob, documentTitle } from './render.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -283,9 +283,33 @@ window.addEventListener('mousemove', (e) => {
 
 /* ---------- Files ---------- */
 
-function download(filename, text, type) {
+async function download(filename, text, type) {
+  const blob = new Blob([text], { type });
+  const file = new File([blob], filename, { type });
+
+  // On iOS / iPadOS and mobile standalone PWAs, <a download> is ignored by WebKit.
+  // navigator.share opens the native iOS Share Sheet ("Save to Files").
+  const isMobileOrStandalone =
+    /iPad|iPhone|iPod|Android/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+    ('standalone' in navigator && navigator.standalone) ||
+    window.matchMedia('(display-mode: standalone)').matches;
+
+  if (isMobileOrStandalone && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: filename,
+      });
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return; // User closed the share sheet
+      console.warn('navigator.share failed, falling back to download link', err);
+    }
+  }
+
   const a = Object.assign(document.createElement('a'), {
-    href: URL.createObjectURL(new Blob([text], { type })),
+    href: URL.createObjectURL(blob),
     download: filename,
   });
   a.click();
@@ -335,7 +359,7 @@ async function save(options = {}) {
         if (err.name === 'AbortError') return;
       }
     }
-    download('typewriter-style.css', cssText, 'text/css');
+    await download('typewriter-style.css', cssText, 'text/css');
     toast('Saved style');
     return;
   }
@@ -389,10 +413,10 @@ async function save(options = {}) {
     }
   }
 
-  // Fallback download (Safari, Firefox, or unsupported contexts)
-  download(`${documentTitle(text)}.md`, text, 'text/markdown');
+  // Fallback download / share (iOS PWA, Safari, Firefox, or unsupported contexts)
+  await download(`${documentTitle(text)}.md`, text, 'text/markdown');
   isDirty = false;
-  toast('Downloaded .md');
+  toast('Saved .md');
   const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   els.saved.textContent = `Downloaded .md (${timeStr})`;
   els.saved.classList.remove('dirty');
@@ -486,6 +510,50 @@ async function loadFromFileInput(file) {
 }
 
 async function exportPdf() {
+  const isIOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone =
+    ('standalone' in navigator && navigator.standalone) ||
+    window.matchMedia('(display-mode: standalone)').matches;
+
+  // On iOS standalone PWA (or mobile where window.print is blocked / unavailable),
+  // generate client-side PDF directly and open the native iOS Share Sheet ("Save to Files" / "Print")
+  if (isIOS || isStandalone) {
+    try {
+      toast('Generating PDF…');
+      const filename = `${documentTitle(mdEditor.getValue())}.pdf`;
+      const pdfBlob = await generatePdfBlob({
+        title: filename,
+        css: cssEditor.getValue(),
+        markdown: mdEditor.getValue(),
+      });
+      const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+        await navigator.share({
+          files: [pdfFile],
+          title: filename,
+        });
+        toast('PDF ready');
+        return;
+      }
+
+      // Fallback: download the generated PDF blob
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(pdfBlob),
+        download: filename,
+      });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      toast('Downloaded PDF');
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return; // User cancelled share sheet
+      console.error('Client-side PDF generation failed, falling back to print dialog', err);
+    }
+  }
+
   toast('Choose “Save as PDF” in the print dialog');
   await printPdf(els.printFrame, { css: cssEditor.getValue(), markdown: mdEditor.getValue() });
 }

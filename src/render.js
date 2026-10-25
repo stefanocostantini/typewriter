@@ -1,6 +1,7 @@
-// Markdown → HTML rendering, used for the style preview and PDF export.
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -82,3 +83,58 @@ export function printPdf(iframe, { css, markdown }) {
     iframe.srcdoc = documentHtml({ title, css, body: renderMarkdown(markdown) });
   });
 }
+
+/** Render directly to a PDF Blob using jsPDF and html2canvas (used on mobile / iOS standalone PWA). */
+export async function generatePdfBlob({ title = 'Document', css = '', markdown = '' }) {
+  const container = document.createElement('div');
+  container.className = 'doc';
+  container.style.position = 'fixed';
+  container.style.left = '-10000px';
+  container.style.top = '0';
+  container.style.width = '794px'; // 210mm in standard 96 DPI CSS pixels (A4 width)
+  container.style.boxSizing = 'border-box';
+  container.style.background = '#ffffff';
+  container.style.color = '#111111';
+  container.style.padding = '22mm 20mm 24mm';
+
+  const styleEl = document.createElement('style');
+  styleEl.textContent = css;
+  container.appendChild(styleEl);
+
+  const bodyEl = document.createElement('div');
+  bodyEl.innerHTML = renderMarkdown(markdown);
+  container.appendChild(bodyEl);
+
+  document.body.appendChild(container);
+
+  try {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'pt',
+      format: 'a4',
+    });
+
+    await new Promise((resolve) => {
+      doc.html(container, {
+        callback: () => resolve(),
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+        },
+        x: 0,
+        y: 0,
+        width: 595.28,
+        windowWidth: 794,
+        autoPaging: 'text',
+      });
+    });
+
+    return doc.output('blob');
+  } finally {
+    if (container.parentNode) {
+      container.parentNode.removeChild(container);
+    }
+  }
+}
+

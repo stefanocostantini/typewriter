@@ -27,6 +27,8 @@
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@lezer/highlight": "^1.2.5",
     "dompurify": "^3.4.17",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "marked": "^18.1.1"
   }
 }
