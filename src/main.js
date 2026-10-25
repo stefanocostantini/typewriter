@@ -73,8 +73,19 @@ const mdEditor = createMarkdownEditor($('#md-editor'), {
   onChange: () => { scheduleSave(); updateCount(); markTyping(); },
 });
 
+function getInitialCss() {
+  const saved = localStorage.getItem(STORE.css);
+  if (!saved) return defaultCss;
+  if (saved.includes('margin: 22mm 20mm 24mm;')) {
+    const updated = saved.replace('margin: 22mm 20mm 24mm;', 'margin: 0;');
+    try { localStorage.setItem(STORE.css, updated); } catch {}
+    return updated;
+  }
+  return saved;
+}
+
 const cssEditor = createCssEditor($('#css-editor'), {
-  doc: localStorage.getItem(STORE.css) ?? defaultCss,
+  doc: getInitialCss(),
   onChange: () => { scheduleSave(); schedulePreview(); updateCount(); },
 });
 

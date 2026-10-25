@@ -35,7 +35,16 @@ const PAPER_CHROME = `
       box-shadow: 0 1px 2px rgba(0,0,0,.18), 0 18px 44px -14px rgba(0,0,0,.45);
     }
   }
-  @media print { html, body { margin: 0; padding: 0; background: #fff; } }
+  @media print {
+    @page { margin: 0; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+  }
 `;
 
 export function documentHtml({ title = 'Document', css = '', body = '' }) {
@@ -44,7 +53,7 @@ export function documentHtml({ title = 'Document', css = '', body = '' }) {
 <title>${title.replace(/</g, '&lt;')}</title>
 <style>${PAPER_CHROME}</style>
 <style id="user-style">${css}</style>
-</head><body><article id="doc" class="doc">${body}</article></body></html>`;
+</head><body><header class="pdf-header" id="pdf-header"></header><article id="doc" class="doc">${body}</article><footer class="pdf-footer" id="pdf-footer"></footer></body></html>`;
 }
 
 /** Live preview in an iframe that can be updated without reloading. */
@@ -101,9 +110,17 @@ export async function generatePdfBlob({ title = 'Document', css = '', markdown =
   styleEl.textContent = css;
   container.appendChild(styleEl);
 
+  const headerEl = document.createElement('header');
+  headerEl.className = 'pdf-header';
+  container.appendChild(headerEl);
+
   const bodyEl = document.createElement('div');
   bodyEl.innerHTML = renderMarkdown(markdown);
   container.appendChild(bodyEl);
+
+  const footerEl = document.createElement('footer');
+  footerEl.className = 'pdf-footer';
+  container.appendChild(footerEl);
 
   document.body.appendChild(container);
 

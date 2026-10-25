@@ -6,7 +6,7 @@
 
 @page {
   size: A4;              /* or: Letter, A5, 210mm 297mm, landscape … */
-  margin: 22mm 20mm 24mm;
+  margin: 0;             /* margin: 0 suppresses browser default header (title/date) and footer (URL/pages) */
 }
 
 :root {
@@ -114,6 +114,10 @@
 
 /* ---------- Print-only tweaks ---------- */
 @media print {
+  body {
+    padding: 22mm 20mm 24mm; /* Page margins for the printed PDF */
+  }
+
   .doc a[href^="http"]::after {
     content: " (" attr(href) ")";
     font-size: 0.8em;
@@ -123,3 +127,38 @@
   /* Force a page break anywhere with:  <div class="page-break"></div> */
   .doc .page-break { break-after: page; }
 }
+
+/* ---------- Header & Footer ----------
+   Browser default headers/footers are suppressed by '@page { margin: 0; }'.
+   You can add and style your own custom running header or footer on every page here:
+*/
+.pdf-header,
+.pdf-footer {
+  display: none;
+}
+
+/* Example custom header & footer (uncomment to enable):
+@media print {
+  .pdf-header {
+    display: block;
+    position: fixed;
+    top: 8mm;
+    left: 20mm;
+    right: 20mm;
+    font-size: 8.5pt;
+    color: var(--muted);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 2mm;
+  }
+  .pdf-footer {
+    display: block;
+    position: fixed;
+    bottom: 8mm;
+    left: 20mm;
+    right: 20mm;
+    font-size: 8.5pt;
+    text-align: center;
+    color: var(--muted);
+  }
+}
+*/
