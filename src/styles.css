@@ -245,14 +245,11 @@ body.is-typing .statusbar { opacity: 0; pointer-events: none; }
 /* ---------- Misc ---------- */
 .print-frame {
   position: fixed;
-  left: 0;
+  left: -10000px;
   top: 0;
-  width: 100%;
-  height: 100%;
+  width: 210mm;
+  height: 297mm;
   border: 0;
-  opacity: 0;
-  pointer-events: none;
-  z-index: -9999;
 }
 
 .drop-overlay {
@@ -283,6 +280,23 @@ body.is-typing .statusbar { opacity: 0; pointer-events: none; }
   z-index: 60;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.has-action { display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 15px; }
+.toast.show.has-action { pointer-events: auto; }
+.toast-action {
+  appearance: none;
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 12px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform .15s, filter .15s;
+}
+.toast-action:hover { filter: brightness(1.08); }
+.toast-action:active { transform: scale(.96); }
 
 /* ---------- Small screens ---------- */
 @media (max-width: 760px) {

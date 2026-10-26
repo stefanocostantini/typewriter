@@ -520,77 +520,102 @@ async function loadFromFileInput(file) {
   els.saved.classList.remove('dirty');
 }
 
+let pdfBusy = false;
+
 async function exportPdf() {
+  if (pdfBusy) return;
   const isIOS =
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const isStandalone =
     ('standalone' in navigator && navigator.standalone) ||
     window.matchMedia('(display-mode: standalone)').matches;
+  const css = cssEditor.getValue();
+  const markdown = mdEditor.getValue();
 
-  // On iOS (both Safari and installed standalone PWA), open the native iOS Share Sheet
-  // or generate client-side PDF directly ("Save to Files" / "Print" / "Share")
-  if (isIOS || isStandalone) {
+  // iOS home-screen app: window.print() is unreliable there, so build the PDF ourselves
+  // (keeping the full stylesheet) and hand it to the native Share Sheet.
+  if (isIOS && isStandalone) {
+    pdfBusy = true;
     try {
-      toast('Generating PDF…');
-      const filename = `${documentTitle(mdEditor.getValue())}.pdf`;
-      const pdfBlob = await generatePdfBlob({
-        title: filename,
-        css: cssEditor.getValue(),
-        markdown: mdEditor.getValue(),
-      });
-      const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
-
-      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-        try {
-          await navigator.share({
-            files: [pdfFile],
-            title: filename,
-          });
-          toast('PDF ready');
-          return;
-        } catch (shareErr) {
-          if (shareErr.name === 'AbortError') return; // User closed share sheet
-          console.warn('navigator.share failed, trying fallback download/view', shareErr);
-        }
-      }
-
-      // Fallback: download or view the generated PDF blob
-      const blobUrl = URL.createObjectURL(pdfBlob);
-      if (isStandalone) {
-        // In iOS standalone PWA, <a download> is ignored by WebKit.
-        // Opening the blob URL displays it in the viewer sheet
-        window.open(blobUrl, '_blank') || (window.location.href = blobUrl);
-        toast('PDF opened');
-      } else {
-        const a = Object.assign(document.createElement('a'), {
-          href: blobUrl,
-          download: filename,
-        });
-        a.click();
-        toast('Downloaded PDF');
-      }
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+      await sharePdf({ css, markdown });
       return;
     } catch (err) {
-      if (err.name === 'AbortError') return;
       console.error('Client-side PDF generation failed, falling back to print dialog', err);
       toast('PDF generation failed, opening print dialog…');
+    } finally {
+      pdfBusy = false;
     }
   }
 
-  toast('Choose “Save as PDF” in the print dialog');
-  await printPdf(els.printFrame, { css: cssEditor.getValue(), markdown: mdEditor.getValue() });
+  // Everywhere else (incl. iOS Safari) the native print pipeline gives the best result:
+  // full CSS support, vector text, selectable/searchable PDF.
+  toast(isIOS
+    ? 'Tap Share (↑) in the print options to save the PDF'
+    : 'Choose “Save as PDF” in the print dialog');
+  await printPdf(els.printFrame, { css, markdown });
+}
+
+async function sharePdf({ css, markdown }) {
+  toast('Generating PDF…', { duration: 0 });
+  const filename = `${documentTitle(markdown)}.pdf`;
+  const blob = await generatePdfBlob({ title: filename, css, markdown });
+  const file = new File([blob], filename, { type: 'application/pdf' });
+
+  if (navigator.canShare?.({ files: [file] })) {
+    const share = async () => {
+      try {
+        // No `title`/`text`: on iOS those get shared as an extra text item next to the file.
+        await navigator.share({ files: [file] });
+        toast('PDF ready');
+      } catch (err) {
+        if (err.name === 'AbortError') return; // user closed the sheet
+        // WebKit only allows share() shortly after a tap. Generating the PDF can take
+        // longer than that, so ask for one more tap to open the sheet.
+        if (err.name === 'NotAllowedError') {
+          toast('PDF ready', { action: { label: 'Share PDF', onClick: share }, duration: 0 });
+          return;
+        }
+        throw err;
+      }
+    };
+    await share();
+    return;
+  }
+
+  // No file sharing available: offer a link the user taps to open the PDF viewer.
+  // (Opening it programmatically after an await is blocked as a popup.)
+  const url = URL.createObjectURL(blob);
+  toast('PDF ready', {
+    action: { label: 'Open PDF', href: url, onClick: () => setTimeout(() => URL.revokeObjectURL(url), 60_000) },
+    duration: 0,
+  });
 }
 
 /* ---------- Toast ---------- */
 
 let toastTimer = 0;
-function toast(msg) {
+/**
+ * Show a toast. `duration: 0` keeps it up until replaced.
+ * `action: { label, onClick, href }` adds a tappable button (or link, if `href` is given).
+ */
+function toast(msg, { action = null, duration = action ? 15000 : 2600 } = {}) {
   els.toast.textContent = msg;
+  els.toast.classList.toggle('has-action', !!action);
+  if (action) {
+    const btn = document.createElement(action.href ? 'a' : 'button');
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    if (action.href) Object.assign(btn, { href: action.href, target: '_blank', rel: 'noopener' });
+    btn.addEventListener('click', () => {
+      els.toast.classList.remove('show');
+      action.onClick?.();
+    }, { once: true });
+    els.toast.append(btn);
+  }
   els.toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2600);
+  if (duration > 0) toastTimer = setTimeout(() => els.toast.classList.remove('show'), duration);
 }
 
 /* ---------- Wiring ---------- */

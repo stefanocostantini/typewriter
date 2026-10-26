@@ -95,84 +95,201 @@ export function printPdf(iframe, { css, markdown }) {
   });
 }
 
-/** Render directly to a PDF Blob using jsPDF and html2canvas (used on mobile / iOS standalone PWA). */
-export async function generatePdfBlob({ title = 'Document', css = '', markdown = '' }) {
-  const container = document.createElement('div');
-  container.className = 'doc';
-  container.style.position = 'fixed';
-  container.style.left = '0';
-  container.style.top = '0';
-  container.style.width = '794px'; // 210mm in standard 96 DPI CSS pixels (A4 width)
-  container.style.boxSizing = 'border-box';
-  container.style.background = '#ffffff';
-  container.style.color = '#111111';
-  container.style.padding = '22mm 20mm 24mm';
-  container.style.zIndex = '-9999';
-  container.style.pointerEvents = 'none';
+/* ---------- Client-side PDF (iOS standalone PWA) ----------
+   iOS home-screen apps can't reliably use window.print(), so there we build the PDF
+   ourselves. jsPDF's doc.html() redraws the DOM through its own vector canvas, which
+   only knows the 14 built-in PDF fonts and drops most CSS — hence "unstyled" PDFs.
+   Instead we lay the document out in an isolated iframe (exactly like the preview),
+   rasterise it page by page with html2canvas, and place each page image into jsPDF.
+   Page breaks are chosen between lines / blocks so text is never sliced in half. */
 
-  const styleEl = document.createElement('style');
-  styleEl.textContent = css;
-  container.appendChild(styleEl);
+const PX_PER_MM = 96 / 25.4;
+const PAGE = { w: 794, h: 1123 }; // A4 in CSS px at 96 dpi
+const MARGIN = { top: 22 * PX_PER_MM, right: 20 * PX_PER_MM, bottom: 24 * PX_PER_MM, left: 20 * PX_PER_MM };
+const PT_PER_PX = 72 / 96;
 
-  const headerEl = document.createElement('header');
-  headerEl.className = 'pdf-header';
-  container.appendChild(headerEl);
-
-  const bodyEl = document.createElement('div');
-  bodyEl.innerHTML = renderMarkdown(markdown);
-  container.appendChild(bodyEl);
-
-  const footerEl = document.createElement('footer');
-  footerEl.className = 'pdf-footer';
-  container.appendChild(footerEl);
-
-  document.body.appendChild(container);
-
-  // Give web fonts a moment to ensure custom typography renders properly
-  await (document.fonts?.ready ?? Promise.resolve());
-
-  if (typeof window !== 'undefined') {
-    window.html2canvas = html2canvas;
+// Applied after the user's stylesheet: fixes the page geometry, leaves typography alone.
+const RASTER_CHROME = `
+  html, body { margin: 0 !important; padding: 0 !important; background: #fff; }
+  body { width: ${PAGE.w}px; }
+  .doc {
+    box-sizing: border-box !important;
+    width: ${PAGE.w}px !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 ${MARGIN.right}px 0 ${MARGIN.left}px !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
   }
+  .pdf-header, .pdf-footer { display: none !important; }
+`;
 
-  try {
-    const doc = new jsPDF({
-      orientation: 'portrait',
-      unit: 'pt',
-      format: 'a4',
-    });
-
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('PDF generation timed out'));
-      }, 15000);
-
-      doc.html(container, {
-        callback: () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        html2canvas: {
-          scale: 1.5, // 1.5 provides crisp Retina rendering while avoiding mobile iOS WebKit canvas memory crash
-          useCORS: true,
-          logging: false,
-        },
-        x: 0,
-        y: 0,
-        width: 595.28,
-        windowWidth: 794,
-        autoPaging: 'text',
-      }).catch((err) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
-    });
-
-    return doc.output('blob');
-  } finally {
-    if (container.parentNode) {
-      container.parentNode.removeChild(container);
-    }
-  }
+function rasterHtml({ title, css, body }) {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<title>${title.replace(/</g, '&lt;')}</title>
+<style>html { background: #fff; }</style>
+<style>${css}</style>
+<style>${RASTER_CHROME}</style>
+</head><body><article id="doc" class="doc">${body}</article></body></html>`;
 }
 
+function loadFrame(html) {
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.tabIndex = -1;
+  Object.assign(iframe.style, {
+    position: 'fixed', left: '-10000px', top: '0',
+    width: `${PAGE.w}px`, height: `${PAGE.h}px`, border: '0',
+  });
+  return new Promise((resolve) => {
+    iframe.addEventListener('load', () => resolve(iframe), { once: true });
+    iframe.srcdoc = html;
+    document.body.appendChild(iframe);
+  });
+}
+
+/** Sorted, merged list of [top, bottom] ranges that a page break must not cut through. */
+function mergeRanges(ranges) {
+  ranges.sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const r of ranges) {
+    const last = out[out.length - 1];
+    if (last && r[0] < last[1] - 0.5) last[1] = Math.max(last[1], r[1]);
+    else out.push([r[0], r[1]]);
+  }
+  return out;
+}
+
+/** Work out where each page starts/ends (in px, relative to the top of .doc). */
+function paginate(docEl, pageH) {
+  const doc = docEl.ownerDocument;
+  const win = doc.defaultView;
+  const origin = docEl.getBoundingClientRect().top;
+  const total = Math.ceil(docEl.getBoundingClientRect().height);
+  if (total <= 0) return [];
+
+  const candidates = [total];
+  const forced = [];
+  const blockers = [];
+  const rel = (r) => [r.top - origin, r.bottom - origin];
+
+  // Every rendered line of text: a break may fall below it, never through it.
+  const walker = doc.createTreeWalker(docEl, NodeFilter.SHOW_TEXT);
+  const range = doc.createRange();
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!n.nodeValue.trim()) continue;
+    range.selectNodeContents(n);
+    for (const r of range.getClientRects()) {
+      if (r.height <= 0) continue;
+      const [t, b] = rel(r);
+      blockers.push([t, b]);
+      candidates.push(b);
+    }
+  }
+
+  for (const el of docEl.querySelectorAll('*')) {
+    const cs = win.getComputedStyle(el);
+    if (cs.display === 'none') continue;
+    const [t, b] = rel(el.getBoundingClientRect());
+    const h = b - t;
+
+    if (/^(block|list-item|table|table-row|flex|grid|flow-root)$/.test(cs.display)) {
+      candidates.push(t, b);
+    }
+    // Images, rules, SVGs etc. are never split (unless taller than a page).
+    if (/^(IMG|SVG|HR|VIDEO|CANVAS|INPUT)$/i.test(el.tagName) && h < pageH) blockers.push([t, b]);
+    // Honour `break-inside: avoid` (code blocks, tables, quotes in the default style).
+    if (cs.breakInside === 'avoid' && h < pageH) blockers.push([t, b]);
+    // Honour `break-after: avoid` (headings): keep them with the start of what follows.
+    if (cs.breakAfter === 'avoid') {
+      const next = el.nextElementSibling;
+      const end = next ? rel(next.getBoundingClientRect())[0] + 1 : b + 1;
+      if (end - t < pageH / 2) blockers.push([t, end]);
+    }
+    // Forced breaks: `.page-break`, `break-before/after: page`.
+    if (el.classList.contains('page-break') || /^(page|always|left|right)$/.test(cs.breakAfter)) forced.push(b);
+    if (/^(page|always|left|right)$/.test(cs.breakBefore)) forced.push(t);
+  }
+
+  const merged = mergeRanges(blockers);
+  const isClear = (c) => {
+    // Binary search the last blocker starting above c.
+    let lo = 0, hi = merged.length - 1, idx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (merged[mid][0] < c - 0.5) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return idx < 0 || merged[idx][1] <= c + 0.5;
+  };
+
+  const breaks = [...new Set(candidates.map((c) => Math.round(c * 2) / 2))]
+    .filter((c) => c > 0 && c <= total && isClear(c))
+    .sort((a, b) => a - b);
+  forced.sort((a, b) => a - b);
+
+  const pages = [];
+  let y = 0;
+  while (y < total - 1) {
+    const limit = y + pageH;
+    let end = forced.find((f) => f > y + 1 && f <= limit);
+    if (end === undefined) {
+      if (limit >= total) end = total;
+      else {
+        // Furthest clean break that still fills at least 20% of the page; else hard cut.
+        end = limit;
+        for (let i = breaks.length - 1; i >= 0; i--) {
+          if (breaks[i] > limit) continue;
+          if (breaks[i] > y + pageH * 0.2) end = breaks[i];
+          break;
+        }
+      }
+    }
+    pages.push([y, end]);
+    y = end;
+  }
+  return pages;
+}
+
+/** Render to a PDF Blob that keeps the full stylesheet (used by the iOS home-screen app). */
+export async function generatePdfBlob({ title = 'Document', css = '', markdown = '' }) {
+  const iframe = await loadFrame(rasterHtml({ title, css, body: renderMarkdown(markdown) }));
+  try {
+    const fdoc = iframe.contentDocument;
+    await (fdoc.fonts?.ready ?? Promise.resolve());
+    await Promise.all([...fdoc.images].map((img) => img.decode?.().catch(() => {})));
+
+    const docEl = fdoc.getElementById('doc');
+    const contentH = PAGE.h - MARGIN.top - MARGIN.bottom;
+    const pages = paginate(docEl, contentH);
+
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4', compress: true });
+    pdf.setProperties({ title: title.replace(/\.pdf$/i, '') });
+
+    // 2× gives crisp text; each page canvas stays well under iOS's canvas size limit.
+    const scale = 2;
+    for (let i = 0; i < pages.length; i++) {
+      const [y0, y1] = pages[i];
+      const height = Math.ceil(y1 - y0);
+      if (height <= 0) continue;
+      const canvas = await html2canvas(docEl, {
+        scale,
+        x: 0,
+        y: y0,
+        width: PAGE.w,
+        height,
+        windowWidth: PAGE.w,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        logging: false,
+      });
+      if (i > 0) pdf.addPage();
+      pdf.addImage(canvas, 'JPEG', 0, MARGIN.top * PT_PER_PX, PAGE.w * PT_PER_PX, height * PT_PER_PX, undefined, 'FAST');
+      canvas.width = canvas.height = 0; // free memory right away (iOS is strict)
+    }
+
+    return pdf.output('blob');
+  } finally {
+    iframe.remove();
+  }
+}
