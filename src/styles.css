@@ -2,63 +2,42 @@
    Typewriter — app UI
    ================================================================ */
 
+/* Each colour is light-dark(<light>, <dark>). Which one applies is decided by
+   `color-scheme`: it follows the OS by default, and is pinned when the user
+   picks a theme (data-theme on <html>, set by the theme toggle). */
 :root {
-  --bg: #f7f6f2;
-  --bg-elev: #efede7;
-  --bg-sunken: #e6e4dd;
-  --line: #dedbd2;
-  --ink: #2d2d30;
-  --ink-strong: #111114;
-  --muted: #74726b;
-  --faint: #b5b2a9;
-  --accent: #14a1d9;
-  --caret: #14a1d9;
-  --selection: rgba(20, 161, 217, .2);
-  --selection-match: rgba(20, 161, 217, .12);
-  --code-bg: rgba(0, 0, 0, .045);
+  color-scheme: light dark;
 
-  --syn-comment: #9a978e;
-  --syn-prop: #0b7fb0;
-  --syn-selector: #a24bbf;
-  --syn-number: #c0671a;
-  --syn-string: #3b8a3e;
-  --syn-keyword: #c2366b;
-  --syn-atom: #5b62c9;
+  --bg: light-dark(#f7f6f2, #18191d);
+  --bg-elev: light-dark(#efede7, #1f2026);
+  --bg-sunken: light-dark(#e6e4dd, #131417);
+  --line: light-dark(#dedbd2, #2c2e36);
+  --ink: light-dark(#2d2d30, #d9d9d4);
+  --ink-strong: light-dark(#111114, #f4f4f0);
+  --muted: light-dark(#74726b, #8e8f97);
+  --faint: light-dark(#b5b2a9, #565863);
+  --accent: light-dark(#14a1d9, #3cb8ea);
+  --caret: light-dark(#14a1d9, #3cb8ea);
+  --selection: light-dark(rgba(20, 161, 217, .2), rgba(60, 184, 234, .25));
+  --selection-match: light-dark(rgba(20, 161, 217, .12), rgba(60, 184, 234, .14));
+  --code-bg: light-dark(rgba(0, 0, 0, .045), rgba(255, 255, 255, .055));
+
+  --syn-comment: light-dark(#9a978e, #6b6d78);
+  --syn-prop: light-dark(#0b7fb0, #6cc7f0);
+  --syn-selector: light-dark(#a24bbf, #d29bf0);
+  --syn-number: light-dark(#c0671a, #f2a766);
+  --syn-string: light-dark(#3b8a3e, #9ad07f);
+  --syn-keyword: light-dark(#c2366b, #ff7aa8);
+  --syn-atom: light-dark(#5b62c9, #9fa6ff);
 
   --font-write: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --font-ui: "Inter Variable", "Inter", system-ui, -apple-system, sans-serif;
   --write-size: 18px;
   --measure: 66ch;
-  color-scheme: light;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #18191d;
-    --bg-elev: #1f2026;
-    --bg-sunken: #131417;
-    --line: #2c2e36;
-    --ink: #d9d9d4;
-    --ink-strong: #f4f4f0;
-    --muted: #8e8f97;
-    --faint: #565863;
-    --accent: #3cb8ea;
-    --caret: #3cb8ea;
-    --selection: rgba(60, 184, 234, .25);
-    --selection-match: rgba(60, 184, 234, .14);
-    --code-bg: rgba(255, 255, 255, .055);
-
-    --syn-comment: #6b6d78;
-    --syn-prop: #6cc7f0;
-    --syn-selector: #d29bf0;
-    --syn-number: #f2a766;
-    --syn-string: #9ad07f;
-    --syn-keyword: #ff7aa8;
-    --syn-atom: #9fa6ff;
-    color-scheme: dark;
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -148,6 +127,9 @@ body {
 .btn-ghost[aria-pressed="true"] { color: var(--accent); background: var(--selection-match); }
 .btn-primary { background: var(--accent); color: #fff; font-weight: 600; }
 .btn-primary:hover { filter: brightness(1.08); box-shadow: 0 4px 16px -6px var(--accent); }
+.btn-icon { padding: 6px 7px; }
+.btn-icon svg { width: 16px; height: 16px; transition: transform .35s cubic-bezier(.3,.7,.2,1); }
+.btn-icon:hover svg { transform: rotate(-15deg); }
 
 body[data-view="write"] .only-style,
 body[data-view="style"] .only-write { display: none; }

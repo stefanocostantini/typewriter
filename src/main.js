@@ -12,7 +12,7 @@ import { createPreview, printPdf, generatePdfBlob, documentTitle } from './rende
 
 const $ = (sel) => document.querySelector(sel);
 
-const STORE = { md: 'typewriter.markdown', css: 'typewriter.css', focus: 'typewriter.focus' };
+const STORE = { md: 'typewriter.markdown', css: 'typewriter.css', focus: 'typewriter.focus', theme: 'typewriter.theme' };
 
 const SAMPLE = `# Hello, Typewriter
 
@@ -51,6 +51,7 @@ const els = {
   styleView: $('#style-view'),
   btnNew: $('#btn-new'),
   btnFocus: $('#btn-focus'),
+  btnTheme: $('#btn-theme'),
   btnReset: $('#btn-reset-style'),
   btnOpen: $('#btn-open'),
   btnSave: $('#btn-save'),
@@ -135,6 +136,54 @@ function setFocusMode(on) {
   els.btnFocus.setAttribute('aria-pressed', String(on));
   mdEditor.setFocusMode(on);
   localStorage.setItem(STORE.focus, on ? '1' : '0');
+}
+
+/* ---------- Theme ---------- */
+
+// 'system' follows the OS; 'light' / 'dark' pin it (see :root[data-theme] in styles.css).
+const THEMES = {
+  system: {
+    label: 'Theme: System',
+    bar: null,
+    icon: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>',
+  },
+  light: {
+    label: 'Theme: Light',
+    bar: '#f7f6f2',
+    icon: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  },
+  dark: {
+    label: 'Theme: Dark',
+    bar: '#18191d',
+    icon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  },
+};
+const THEME_ORDER = ['system', 'light', 'dark'];
+const themeMetas = [...document.querySelectorAll('meta[name="theme-color"]')]
+  .map((m) => ({ el: m, original: m.content }));
+
+let theme = THEMES[localStorage.getItem(STORE.theme)] ? localStorage.getItem(STORE.theme) : 'system';
+
+function setTheme(next) {
+  theme = next;
+  const t = THEMES[next];
+  if (next === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = next;
+  themeMetas.forEach(({ el, original }) => { el.content = t.bar ?? original; });
+  els.btnTheme.innerHTML =
+    `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${t.icon}</svg>`;
+  const nextLabel = THEMES[THEME_ORDER[(THEME_ORDER.indexOf(next) + 1) % THEME_ORDER.length]].label.replace('Theme: ', '');
+  els.btnTheme.title = `${t.label} (click for ${nextLabel})`;
+  els.btnTheme.setAttribute('aria-label', t.label);
+  try {
+    if (next === 'system') localStorage.removeItem(STORE.theme);
+    else localStorage.setItem(STORE.theme, next);
+  } catch {}
+}
+
+function cycleTheme() {
+  setTheme(THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length]);
+  toast(THEMES[theme].label);
 }
 
 /* ---------- Status ---------- */
@@ -625,6 +674,7 @@ window.addEventListener('resize', moveIndicator);
 
 els.btnNew.addEventListener('click', newDocument);
 els.btnFocus.addEventListener('click', () => { setFocusMode(!focusMode); mdEditor.focus(); });
+els.btnTheme.addEventListener('click', cycleTheme);
 els.btnPdf.addEventListener('click', exportPdf);
 els.btnSave.addEventListener('click', () => save());
 els.btnOpen.addEventListener('click', openFile);
@@ -701,6 +751,7 @@ window.addEventListener('drop', async (e) => {
 
 setView('write');
 setFocusMode(focusMode);
+setTheme(theme);
 document.fonts.ready.then(() => { moveIndicator(); mdEditor.view.requestMeasure(); });
 
 // Restore linked file handle from IndexedDB if available
